@@ -4,12 +4,13 @@ from dataclasses import dataclass
 from multiprocessing import cpu_count
 from pathlib import Path
 import os
+from typing import TypeAlias
 from rich import print as rprint
 from rich.progress import track
 
-# 3.10+ 兼容的类型定义
-AnyPath = str | Path
-FilterFunc = Callable[[str], bool]
+
+AnyPath: TypeAlias = str | Path
+FilterFunc: TypeAlias = Callable[[str], bool]
 
 
 @dataclass
