@@ -45,31 +45,31 @@ if __name__ == "__main__":
     from rich import print as rprint
     
     # 示例1：使用大小过滤器
-    print("\n[bold green]示例1: 查找大于 1KB 的 Python 文件[/bold green]")
+    print("\n示例1: 查找大于 1KB 的 Python 文件")
     config1 = FndConfig(
         suffixes={"py"},
         filter_fn=custom_size_filter,
         recursive=True
     )
     
-    files1 = find_files("~/fnd", config1)
+    files1 = find_files("./", config1)
     rprint(f"找到 {len(files1)} 个大于 1KB 的 Python 文件")
     rprint(files1[:3])  # 显示前3个结果
     
     # 示例2：结合多种过滤器
-    print("\n[bold green]示例2: 查找非临时文件的 Python 文件[/bold green]")
+    print("\n示例2: 查找非临时文件的 Python 文件")
     config2 = FndConfig(
         suffixes={"py"},
         filter_fn=custom_extension_filter,
         recursive=True
     )
     
-    files2 = find_files("~/fnd", config2)
+    files2 = find_files("./", config2)
     rprint(f"找到 {len(files2)} 个非临时的 Python 文件")
     rprint(files2[:3])  # 显示前3个结果
     
     # 示例3：组合使用内置过滤器和自定义过滤器
-    print("\n[bold green]示例3: 查找包含 'core' 的大于 1KB 的 Python 文件[/bold green]")
+    print("\n示例3: 查找包含 'core' 的大于 1KB 的 Python 文件")
     config3 = FndConfig(
         suffixes={"py"},
         include={"core"},
@@ -77,6 +77,6 @@ if __name__ == "__main__":
         recursive=True
     )
     
-    files3 = find_files("~/fnd", config3)
+    files3 = find_files("./", config3)
     rprint(f"找到 {len(files3)} 个符合条件的文件")
     rprint(files3[:3])  # 显示前3个结果
