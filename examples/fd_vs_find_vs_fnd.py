@@ -93,8 +93,9 @@ if __name__ == "__main__":
     root = "/usr"
     # root = "/var"
     
-    suffixes = {"so"}
-    include = {"lib"}
+    suffixes = {"so"}  # 搜索动态库文件
+    # include = {"lib"}  # 文件名包含 lib 关键字的
+    include = None  # 不包含任何关键词
 
     # 组装配置对象
     config = FndConfig(

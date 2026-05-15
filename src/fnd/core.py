@@ -89,7 +89,7 @@ def find_files(
     filter_threads: int = 1, 
 ) -> list[str]:
     """
-    查找符合指定条件的文件
+    查找符合指定条件的文件, 推荐仅在明确筛选耗时较长的情况使用并行筛选
 
     Args:
         root: 搜索的根目录
