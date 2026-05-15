@@ -8,9 +8,14 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "rich>=15.0.0",
 ]
 
 [build-system]
 requires = ["uv_build>=0.10.7,<0.11.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "codetiming>=1.4.0",
+    "rich>=15.0.0",
+]
