@@ -1,6 +1,6 @@
 [project]
 name = "fnd"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Fast and Simple File Search Tool in Python 一个快速简单的文件搜索工具"
 readme = "README.md"
 authors = [

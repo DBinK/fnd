@@ -1,57 +1,45 @@
-
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from multiprocessing import cpu_count
-import os
-from pathlib import Path
-from typing import Callable, Iterable, Iterator, TypeAlias
 from dataclasses import dataclass
-
-
+from multiprocessing import cpu_count
+from pathlib import Path
+import os
+from rich import print as rprint
 from rich.progress import track
 
-# 类型定义
-AnyPath: TypeAlias = str | Path
-FilterFunc = Callable[[AnyPath], bool]
+# 3.10+ 兼容的类型定义
+AnyPath = str | Path
+FilterFunc = Callable[[str], bool]
 
 
 @dataclass
 class FndConfig:
     """文件查找配置"""
-    suffixes: Iterable[str] | None = None  # 如 ["py", "txt"]
+
+    suffixes: Iterable[str] | None = None  # 支持包含点的后缀集合，如 [".py", ".txt"]
     include: Iterable[str] | None = None
     recursive: bool = True
     filter_fn: FilterFunc | None = None
     verbose: bool = True
 
 
-def iter_files(
-    root: AnyPath, 
-    recursive: bool = True
-) -> Iterator[str]:
-    """
-    列出目录下的所有文件（迭代器版本）
-    
-    Args:
-        root: 要搜索的目录
-        recursive: 是否递归搜索子目录. 默认为 True.
-    
-    Yields:
-        str: 文件路径，逐个产出
-    """
-    root = str(root)
+def iter_files(root: AnyPath, recursive: bool = True) -> Iterator[str]:
+    """纯字符串高性能遍历"""
+    root_str = str(root)
 
     if not recursive:
-        with os.scandir(root) as it:
-            for entry in it:
-                if entry.is_file():
-                    yield entry.path
+        try:
+            with os.scandir(root_str) as it:
+                for entry in it:
+                    if entry.is_file():
+                        yield entry.path
+        except PermissionError:
+            pass
         return
 
-    stack = [root]
-
+    stack = [root_str]
     while stack:
         current = stack.pop()
-
         try:
             with os.scandir(current) as it:
                 for entry in it:
@@ -59,22 +47,12 @@ def iter_files(
                         yield entry.path
                     elif entry.is_dir(follow_symlinks=False):
                         stack.append(entry.path)
-
         except PermissionError:
             pass
 
 
 def list_files(root: AnyPath, recursive: bool = True) -> list[str]:
-    """ 
-    列出目录下的所有文件 
-    
-    Args:
-        root (str | Path): 要搜索的目录
-        recursive (bool, optional): 是否递归搜索子目录. 默认为 True.
-    
-    Returns:
-        list[str]: 包含所有文件路径的列表
-    """
+    """列出目录下的所有文件（列表包装）"""
     return list(iter_files(root, recursive=recursive))
 
 
@@ -82,31 +60,23 @@ def _match_filter(
     path: str,
     suffixes_set: set[str] | None = None,
     include_keywords: list[str] | None = None,
-    filter_fn: FilterFunc | None = None
+    filter_fn: FilterFunc | None = None,
 ) -> bool:
-    """
-    根据过滤条件判断路径是否应该被包含
-    
-    Args:
-        path: 要检查的文件路径
-        suffixes_set: 允许的文件扩展名集合（小写）
-        include_keywords: 文件名中必须包含的关键字列表
-        filter_fn: 自定义过滤函数
-    
-    Returns:
-        bool: 如果路径应该被包含则返回 True，否则返回 False
-    """
-    name = path.rsplit("/", 1)[-1]
+    """极致压榨性能的过滤函数，基于 os.path 且免除 lstrip"""
 
+    # 后缀过滤：C 实现的 splitext 返回形式如 ('/path/to/file', '.py')
     if suffixes_set is not None:
-        ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+        ext = os.path.splitext(path)[1].lower()  # 直接拿到带点的后缀转小写
         if ext not in suffixes_set:
             return False
 
+    # 关键字过滤
     if include_keywords is not None:
+        name = os.path.basename(path)
         if not all(k in name for k in include_keywords):
             return False
 
+    # 自定义过滤函数
     if filter_fn is not None and not filter_fn(path):
         return False
 
@@ -115,86 +85,56 @@ def _match_filter(
 
 def find_files(
     root: AnyPath,
-    config: FndConfig | None = None
+    config: FndConfig | None = None,
+    filter_threads: int = 1, 
 ) -> list[str]:
     """
     查找符合指定条件的文件
-    
+
     Args:
         root: 搜索的根目录
         config: 文件查找配置
-    
+        parallel: 是否并行筛选，适用于筛选耗时较长的情况
+        filter_threads: 并行筛选时的线程数, 默认不开多线程, 传入 -1 则使用 cpu_count - 1 个线程
+
     Returns:
         list[str]: 符合条件的文件路径列表
     """
-    if config is None:
-        config = FndConfig()
-    
-    root_path = str(root)
+    cfg = config or FndConfig()
 
-    suffixes_set = {s.lower() for s in config.suffixes} if config.suffixes else None
-    include_keywords = list(config.include) if config.include else None
+    # 外层一次性强力清洗：确保 suffixes_set 内部全部带有 "." 且为小写
+    suffixes_set = (
+        {s.lower() if s.startswith(".") else f".{s.lower()}" for s in cfg.suffixes}
+        if cfg.suffixes
+        else None
+    )
+    include_keywords = list(cfg.include) if cfg.include else None
 
-    paths = list_files(root_path) if config.recursive else list_files(root_path, recursive=False)
-    # paths = iter_files(root_path) if config.recursive else iter_files(root_path, recursive=False)
-
-    result: list[str] = []
+    # 获取基础路径文件（纯字符串列表）
+    paths = list_files(root, recursive=cfg.recursive)
 
     track_iter = (
-        track(paths, description="查找文件...")
-        if config.verbose
-        else paths
+        track(paths, description="fnd 查找文件...") if cfg.verbose else paths
     )
 
-    for path in track_iter:
-        if _match_filter(path, suffixes_set, include_keywords, config.filter_fn):
-            result.append(path)
-
-    return result
-
-
-def find_files_parallel(
-    root: AnyPath,
-    config: FndConfig | None = None,
-    threads: int = cpu_count() - 1  # 默认使用 cpu_count - 1 个线程
-) -> list[str]:
-    """
-    查找符合指定条件的文件（并行筛选版本）, 适用于筛选耗时较长的情况
-
-    Args:
-        root: 搜索的根目录
-        config: 文件查找配置
-        threads: 线程池数量
-
-    Returns:
-        list[str]: 符合条件的文件路径列表
-    """
-    if config is None:
-        config = FndConfig()
-
-    root_path = str(root)
-
-    suffixes_set = {s.lower() for s in config.suffixes} if config.suffixes else None
-    include_keywords = list(config.include) if config.include else None
-
-    paths = list_files(root_path) if config.recursive else list_files(root_path, recursive=False)
-
-    def check_path(path: str) -> str | None:
-        if _match_filter(path, suffixes_set, include_keywords, config.filter_fn):
-            return path
+    # 过滤单步闭包
+    def check_path(p: str) -> str | None:
+        if _match_filter(p, suffixes_set, include_keywords, cfg.filter_fn):
+            return p
         return None
 
-    track_iter = (
-        track(paths, description="查找文件...")
-        if config.verbose
-        else paths
-    )
+    # 串行筛选分支：海象运算符配合列表推导式
+    if filter_threads == 1:
+        return [res for p in track_iter if (res := check_path(p)) is not None]
 
-    with ThreadPoolExecutor(max_workers=threads) as executor:
+    # 并行筛选分支
+    max_workers = cpu_count() - 1 if filter_threads == -1 else max(1, filter_threads)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         results = list(executor.map(check_path, track_iter))
 
     return [r for r in results if r is not None]
-    
+
 
 if __name__ == "__main__":
 
