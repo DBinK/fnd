@@ -1,4 +1,6 @@
 
+from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import cpu_count
 import os
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, TypeAlias
@@ -150,6 +152,49 @@ def find_files(
 
     return result
 
+
+def find_files_parallel(
+    root: AnyPath,
+    config: FndConfig | None = None,
+    threads: int = cpu_count() - 1  # 默认使用 cpu_count - 1 个线程
+) -> list[str]:
+    """
+    查找符合指定条件的文件（并行筛选版本）, 适用于筛选耗时较长的情况
+
+    Args:
+        root: 搜索的根目录
+        config: 文件查找配置
+        threads: 线程池数量
+
+    Returns:
+        list[str]: 符合条件的文件路径列表
+    """
+    if config is None:
+        config = FndConfig()
+
+    root_path = str(root)
+
+    suffixes_set = {s.lower() for s in config.suffixes} if config.suffixes else None
+    include_keywords = list(config.include) if config.include else None
+
+    paths = list_files(root_path) if config.recursive else list_files(root_path, recursive=False)
+
+    def check_path(path: str) -> str | None:
+        if _match_filter(path, suffixes_set, include_keywords, config.filter_fn):
+            return path
+        return None
+
+    track_iter = (
+        track(paths, description="查找文件...")
+        if config.verbose
+        else paths
+    )
+
+    with ThreadPoolExecutor(max_workers=threads) as executor:
+        results = list(executor.map(check_path, track_iter))
+
+    return [r for r in results if r is not None]
+    
 
 if __name__ == "__main__":
 
